@@ -1,49 +1,50 @@
 name: diagnose analyzer
 
-# Temporary. Isolates whether the NullReferenceException on windows-latest comes
-# from module auto-loading picking the image's Windows PowerShell copy of
-# PSScriptAnalyzer instead of the PowerShell 7 one that Install-Module adds.
+# Temporary. The crash did not reproduce in three attempts, so this measures how
+# often it happens rather than assuming a deterministic cause: the exact failing
+# invocation, in a fresh process, twenty times, on both platforms.
 on:
   push:
     branches: [fix/windows-analyzer]
   workflow_dispatch:
 
 jobs:
-  autoload:
-    name: Auto-loaded, no Import-Module (what the first push did)
-    runs-on: windows-latest
-    timeout-minutes: 10
-    continue-on-error: true
+  repeat:
+    name: Twenty runs on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
     steps:
       - uses: actions/checkout@v7
-      - shell: pwsh
-        run: |
-          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-          Install-Module -Name PSScriptAnalyzer -Force
-      - shell: pwsh
-        run: |
-          "modules loaded before the call:"
-          Get-Module PSScriptAnalyzer | Select-Object Version, ModuleBase | Format-Table -AutoSize
-          $findings = Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1
-          "auto-load resolved to:"
-          Get-Module PSScriptAnalyzer | Select-Object Version, ModuleBase | Format-Table -AutoSize
-          "findings: $(@($findings).Count)"
 
-  explicit:
-    name: Explicit Import-Module first
-    runs-on: windows-latest
-    timeout-minutes: 10
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v7
       - shell: pwsh
         run: |
           Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
           Install-Module -Name PSScriptAnalyzer -Force
-      - shell: pwsh
+
+      - name: Repeat the exact failing invocation in fresh processes
+        shell: pwsh
         run: |
-          Import-Module PSScriptAnalyzer
-          "import resolved to:"
-          Get-Module PSScriptAnalyzer | Select-Object Version, ModuleBase | Format-Table -AutoSize
-          $findings = Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1
-          "findings: $(@($findings).Count)"
+          $probe = @(
+              '$ErrorActionPreference = ''Stop'''
+              'try {'
+              '    $f = Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1 -ErrorAction Stop'
+              '    "OK " + @($f).Count'
+              '}'
+              'catch { "FAIL " + $_.Exception.Message }'
+          )
+          Set-Content -LiteralPath ./probe.ps1 -Value $probe
+          $failures = 0
+          foreach ($i in 1..20) {
+              $out = (pwsh -NoProfile -File ./probe.ps1) -join ' '
+              if ($out -like 'FAIL*') {
+                  $failures++
+                  "  run $i : $out"
+              }
+          }
+          Remove-Item -LiteralPath ./probe.ps1
+          "$failures failure(s) in 20 runs"
+          if ($failures) { 'REPRODUCED' } else { 'did not reproduce' }
