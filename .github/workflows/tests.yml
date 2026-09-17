@@ -1,0 +1,63 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  powershell:
+    name: PowerShell on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Pester and PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module -Name Pester -MinimumVersion 5.0 -Force -SkipPublisherCheck
+          Install-Module -Name PSScriptAnalyzer -Force
+
+      # -ErrorAction Stop on both: a crashed analyzer returns nothing, which is
+      # indistinguishable from clean prose unless the failure is made to throw.
+      - name: Analyzer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $findings = Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1 -ErrorAction Stop
+          $findings | Format-Table -AutoSize
+          if ($findings) { throw "$($findings.Count) analyzer finding(s)." }
+
+      - name: Pester
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $result = Invoke-Pester -Path ./tests -Output Detailed -PassThru -ErrorAction Stop
+          if ($result.FailedCount) { throw "$($result.FailedCount) test(s) failed." }
+          if (-not $result.PassedCount) { throw 'No tests ran.' }
+
+  rom:
+    name: Test ROM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      # The ROM is checked in, so this proves it is what the source builds
+      # rather than something hand-edited that drifted.
+      - name: The checked-in ROM matches its source
+        run: |
+          python rumble-pulse/src/build.py
+          git diff --exit-code -- rumble-pulse/rumble-pulse.gb
+
+      - name: Rumble register timings
+        run: python rumble-pulse/src/test.py

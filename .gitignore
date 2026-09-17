@@ -1,0 +1,14 @@
+# Patched output and any ROM dropped in for testing
+*.gbc
+*.gb
+*.sav
+*.srm
+
+# The test ROM is the exception: it is built from rumble-pulse/src and is a
+# tool this repo ships, not output from a run. Its screenshots are checked in
+# for the same reason, since the README shows them.
+!rumble-pulse/rumble-pulse.gb
+
+# Python's own leavings are not.
+__pycache__/
+.mypy_cache/

@@ -1,0 +1,10 @@
+# Store text with LF and check it out however the platform wants it, so a
+# checkout on Windows and one on Linux do not show each other as changed.
+* text=auto
+
+# Binary, so git neither rewrites line endings in them nor tries to diff them.
+# They are small enough that LFS would cost more than it saves: the test ROM is
+# 32 KiB and each screenshot is about 4 KiB.
+*.gb binary
+*.gbc binary
+*.png binary
