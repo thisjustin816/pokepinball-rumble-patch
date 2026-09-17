@@ -8,11 +8,7 @@ on:
 
 jobs:
   # The analyzer's rules are about the source, not the platform, so one run
-  # covers both. It runs here rather than on windows-latest, where
-  # Invoke-ScriptAnalyzer fails with a NullReferenceException that does not
-  # reproduce on a local Windows box running the same version against the same
-  # files. Tests still cover Windows below, which is what platform coverage is
-  # actually for.
+  # covers both, and tests below still cover Windows.
   analyzer:
     name: Analyzer
     runs-on: ubuntu-latest
@@ -28,13 +24,32 @@ jobs:
 
       # -ErrorAction Stop because a crashed analyzer returns nothing, which is
       # indistinguishable from clean source unless the failure is made to throw.
+      #
+      # Invoke-ScriptAnalyzer threw a NullReferenceException twice, on the first
+      # CI run and once on a developer machine, then never again in 23 controlled
+      # repeats of the same command against the same files on the same version.
+      # The cause is unknown, so the retry is for that crash alone. Findings are
+      # returned rather than thrown, so a real finding still fails on the first
+      # attempt and is never retried away.
       - name: Analyze
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           Import-Module PSScriptAnalyzer
           "PSScriptAnalyzer $((Get-Module PSScriptAnalyzer).Version) on $($PSVersionTable.PSVersion)"
-          $findings = Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1 -ErrorAction Stop
+          $findings = $null
+          foreach ($attempt in 1..3) {
+              try {
+                  $findings = Invoke-ScriptAnalyzer -Path . -Recurse `
+                      -Settings ./PSScriptAnalyzerSettings.psd1 -ErrorAction Stop
+                  break
+              }
+              catch {
+                  "attempt $attempt crashed: $($_.Exception.Message)"
+                  if ($attempt -eq 3) { throw }
+                  Start-Sleep -Seconds 5
+              }
+          }
           $findings | Format-Table -AutoSize
           if ($findings) { throw "$($findings.Count) analyzer finding(s)." }
 
