@@ -7,48 +7,70 @@ on:
   workflow_dispatch:
 
 jobs:
-  powershell:
-    name: PowerShell on ${{ matrix.os }}
+  # The analyzer's rules are about the source, not the platform, so one run
+  # covers both. It runs here rather than on windows-latest, where
+  # Invoke-ScriptAnalyzer fails with a NullReferenceException that does not
+  # reproduce on a local Windows box running the same version against the same
+  # files. Tests still cover Windows below, which is what platform coverage is
+  # actually for.
+  analyzer:
+    name: Analyzer
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module -Name PSScriptAnalyzer -Force
+
+      # -ErrorAction Stop because a crashed analyzer returns nothing, which is
+      # indistinguishable from clean source unless the failure is made to throw.
+      - name: Analyze
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Import-Module PSScriptAnalyzer
+          "PSScriptAnalyzer $((Get-Module PSScriptAnalyzer).Version) on $($PSVersionTable.PSVersion)"
+          $findings = Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1 -ErrorAction Stop
+          $findings | Format-Table -AutoSize
+          if ($findings) { throw "$($findings.Count) analyzer finding(s)." }
+
+  tests:
+    name: Tests on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - name: Install Pester and PSScriptAnalyzer
+      - name: Install Pester
         shell: pwsh
         run: |
           Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
           Install-Module -Name Pester -MinimumVersion 5.0 -Force -SkipPublisherCheck
-          Install-Module -Name PSScriptAnalyzer -Force
-
-      # -ErrorAction Stop on both: a crashed analyzer returns nothing, which is
-      # indistinguishable from clean prose unless the failure is made to throw.
-      - name: Analyzer
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $findings = Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1 -ErrorAction Stop
-          $findings | Format-Table -AutoSize
-          if ($findings) { throw "$($findings.Count) analyzer finding(s)." }
 
       - name: Pester
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $result = Invoke-Pester -Path ./tests -Output Detailed -PassThru -ErrorAction Stop
+          $result = Invoke-Pester -Path ./tests -Output Detailed -PassThru
           if ($result.FailedCount) { throw "$($result.FailedCount) test(s) failed." }
           if (-not $result.PassedCount) { throw 'No tests ran.' }
 
   rom:
     name: Test ROM
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.x'
 
