@@ -199,8 +199,11 @@ values back with one threshold changed. `-Author` changes the credit, and
 
 ### Checking a patch before flashing
 
-Any pair the patch produces can be replayed in the test ROM. Set `PATTERN` to
-the byte, `RUN` to the duration, `GAP` to the frames between repeats:
+Before flashing a patched game, the same
+[`rumble-pulse.gb`](rumble-pulse/) used for calibrating above will play back any
+pattern and duration the patch produced, so how an event will feel is a question
+the test ROM can answer first. In PATTERN mode, set `PATTERN` to the byte, `RUN`
+to the duration, and `GAP` to the frames between repeats:
 
 | Check                         | PATTERN | RUN | GAP |
 | ----------------------------- | ------- | --- | --- |
