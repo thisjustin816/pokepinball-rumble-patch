@@ -1,126 +1,49 @@
 name: diagnose analyzer
 
-# Temporary. Gathers evidence about the NullReferenceException that
-# Invoke-ScriptAnalyzer throws only on windows-latest, then gets deleted.
+# Temporary. Isolates whether the NullReferenceException on windows-latest comes
+# from module auto-loading picking the image's Windows PowerShell copy of
+# PSScriptAnalyzer instead of the PowerShell 7 one that Install-Module adds.
 on:
   push:
     branches: [fix/windows-analyzer]
   workflow_dispatch:
 
 jobs:
-  diagnose:
-    name: Diagnose on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, ubuntu-latest]
+  autoload:
+    name: Auto-loaded, no Import-Module (what the first push did)
+    runs-on: windows-latest
+    timeout-minutes: 10
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v7
-
-      - name: Before installing anything
-        shell: pwsh
-        run: |
-          "=== host ==="
-          $PSVersionTable | Format-List PSVersion, PSEdition, OS, Platform
-          "=== PSScriptAnalyzer already on the image ==="
-          Get-Module PSScriptAnalyzer -ListAvailable |
-            Select-Object Version, ModuleBase | Format-Table -AutoSize
-          "=== PSModulePath ==="
-          $env:PSModulePath -split [IO.Path]::PathSeparator | ForEach-Object { "  $_" }
-
-      - name: Install PSScriptAnalyzer
-        shell: pwsh
+      - shell: pwsh
         run: |
           Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
           Install-Module -Name PSScriptAnalyzer -Force
-
-      - name: After installing
-        shell: pwsh
+      - shell: pwsh
         run: |
-          "=== every version now visible ==="
-          Get-Module PSScriptAnalyzer -ListAvailable |
-            Select-Object Version, ModuleBase | Format-Table -AutoSize
-          "=== which one Import-Module picks ==="
-          Import-Module PSScriptAnalyzer
-          Get-Module PSScriptAnalyzer | Select-Object Version, ModuleBase | Format-List
+          "modules loaded before the call:"
+          Get-Module PSScriptAnalyzer | Select-Object Version, ModuleBase | Format-Table -AutoSize
+          $findings = Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1
+          "auto-load resolved to:"
+          Get-Module PSScriptAnalyzer | Select-Object Version, ModuleBase | Format-Table -AutoSize
+          "findings: $(@($findings).Count)"
 
-      - name: Probe each invocation shape
-        shell: pwsh
-        continue-on-error: true
+  explicit:
+    name: Explicit Import-Module first
+    runs-on: windows-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - shell: pwsh
         run: |
-          Import-Module PSScriptAnalyzer
-          "loaded $((Get-Module PSScriptAnalyzer).Version)"
-
-          function Probe {
-              param([string]$Label, [scriptblock]$Body)
-              "--- $Label"
-              try {
-                  $r = & $Body
-                  "    ok: $(@($r).Count) finding(s)"
-              }
-              catch {
-                  "    THREW: $($_.Exception.GetType().FullName): $($_.Exception.Message)"
-                  if ($_.Exception.InnerException) {
-                      "    inner: $($_.Exception.InnerException.GetType().FullName): $($_.Exception.InnerException.Message)"
-                  }
-                  "    stack:"
-                  ($_.ScriptStackTrace -split "`n") | ForEach-Object { "      $_" }
-                  if ($_.Exception.StackTrace) {
-                      ($_.Exception.StackTrace -split "`n") | Select-Object -First 12 | ForEach-Object { "      $_" }
-                  }
-              }
-          }
-
-          Probe 'repo root, recurse, settings file (what CI ran)' {
-              Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1
-          }
-          Probe 'repo root, recurse, absolute settings path' {
-              Invoke-ScriptAnalyzer -Path . -Recurse -Settings (Resolve-Path ./PSScriptAnalyzerSettings.psd1).Path
-          }
-          Probe 'repo root, recurse, no settings' {
-              Invoke-ScriptAnalyzer -Path . -Recurse
-          }
-          Probe 'one file, settings file' {
-              Invoke-ScriptAnalyzer -Path ./Set-PinballRumble.ps1 -Settings ./PSScriptAnalyzerSettings.psd1
-          }
-          Probe 'one file, no settings' {
-              Invoke-ScriptAnalyzer -Path ./Set-PinballRumble.ps1
-          }
-          Probe 'the tests file, settings file' {
-              Invoke-ScriptAnalyzer -Path ./tests/PinballRumble.Tests.ps1 -Settings ./PSScriptAnalyzerSettings.psd1
-          }
-          Probe 'the settings file itself as a target' {
-              Invoke-ScriptAnalyzer -Path ./PSScriptAnalyzerSettings.psd1 -Settings ./PSScriptAnalyzerSettings.psd1
-          }
-          Probe 'settings as a hashtable' {
-              Invoke-ScriptAnalyzer -Path . -Recurse -Settings @{
-                  ExcludeRules = @('PSAvoidUsingWriteHost', 'PSUseCompatibleCommands')
-              }
-          }
-          Probe 'settings file, but ExcludeRules only' {
-              Invoke-ScriptAnalyzer -Path . -Recurse -Settings @{
-                  ExcludeRules = @('PSAvoidUsingWriteHost', 'PSUseCompatibleCommands')
-                  Rules        = @{ PSAvoidLongLines = @{ Enable = $true; MaximumLineLength = 120 } }
-              }
-          }
-
-      - name: Probe each rule in the settings file on its own
-        shell: pwsh
-        continue-on-error: true
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module -Name PSScriptAnalyzer -Force
+      - shell: pwsh
         run: |
           Import-Module PSScriptAnalyzer
-          $settings = Import-PowerShellDataFile ./PSScriptAnalyzerSettings.psd1
-          foreach ($rule in $settings.Rules.Keys) {
-              try {
-                  $null = Invoke-ScriptAnalyzer -Path . -Recurse -Settings @{
-                      IncludeRules = @($rule)
-                      Rules        = @{ $rule = $settings.Rules[$rule] }
-                  } -ErrorAction Stop
-                  "  ok     $rule"
-              }
-              catch {
-                  "  THREW  $rule -> $($_.Exception.Message)"
-              }
-          }
+          "import resolved to:"
+          Get-Module PSScriptAnalyzer | Select-Object Version, ModuleBase | Format-Table -AutoSize
+          $findings = Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1
+          "findings: $(@($findings).Count)"
