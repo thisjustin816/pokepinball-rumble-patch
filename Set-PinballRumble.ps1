@@ -78,7 +78,7 @@ Without it the name carries the settings in the bracketed form GoodTools
 and TOSEC use for an unofficial change, so pokepinball.gbc rescaled for a
 start length of 3 becomes
 
-    pokepinball [rumble fix (s3) by thisjustin816].gbc
+    pokepinball [rumble fix (s3) by thisJUSTin816].gbc
 
 and a session of several settings leaves one file each to compare.
 
@@ -253,7 +253,7 @@ param (
             'contain \ / : * ? " < > | or control characters.'
         )
     )]
-    [string]$Author = 'thisjustin816',
+    [string]$Author = 'thisJUSTin816',
 
     [Parameter(ParameterSetName = 'Preset')]
     [ValidateSet('Original', 'GBMake', 'InsideGadgets', 'AliExpress')]

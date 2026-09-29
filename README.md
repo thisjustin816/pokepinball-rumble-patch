@@ -10,7 +10,7 @@ rumble code alone. Apply this last, after any other patch.
 ./Set-PinballRumble.ps1 -Rom pokepinball.gbc -Preset GBMake
 ```
 
-Writes `pokepinball [rumble fix (s3) by thisjustin816].gbc` and never touches
+Writes `pokepinball [rumble fix (s3) by thisJUSTin816].gbc` and never touches
 the input. Needs PowerShell 7.
 
 Windows marks anything extracted from a downloaded zip, and the default
@@ -179,9 +179,9 @@ GoodTools and TOSEC use for an unofficial change, so a session of several
 settings leaves one file each to compare rather than one overwritten:
 
 ```text
-pokepinball [rumble fix (s3) by thisjustin816].gbc
-pokepinball [rumble fix (s4) by thisjustin816].gbc
-pokepinball [rumble fix (t2w1-s4) by thisjustin816].gbc
+pokepinball [rumble fix (s3) by thisJUSTin816].gbc
+pokepinball [rumble fix (s4) by thisJUSTin816].gbc
+pokepinball [rumble fix (t2w1-s4) by thisJUSTin816].gbc
 ```
 
 | Letter | Byte it wrote                               |

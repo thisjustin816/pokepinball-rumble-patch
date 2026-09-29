@@ -426,7 +426,7 @@ Describe 'Pinball rumble patch' {
 
         It 'credits the script author by default, and whoever -Author names' {
             & $tool -Rom $rom -StartFrames 3
-            Test-Path -LiteralPath (Join-Path $TestDrive 'pinball [rumble fix (s3) by thisjustin816].gbc') |
+            Test-Path -LiteralPath (Join-Path $TestDrive 'pinball [rumble fix (s3) by thisJUSTin816].gbc') |
                 Should -BeTrue
 
             & $tool -Rom $rom -StartFrames 4 -Author ''
