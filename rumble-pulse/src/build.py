@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Assemble RUMBLE PULSE TEST into a 32 KiB MBC5+RUMBLE .gb image.
 
-Bit length is expressed in LCD frames by default -- the only cadence a real
-game can produce from a VBlank handler -- with an optional millisecond mode
+Bit length is expressed in LCD frames by default, the only cadence a real
+game can produce from a VBlank handler, with an optional millisecond mode
 for sub-frame threshold hunting.
 """
 
@@ -25,7 +25,7 @@ RUMBLE = 0x4000
 
 # ---- WRAM -------------------------------------------------------------
 pattern, cursor, blen_ms, mode, prespin = 0xC000, 0xC001, 0xC002, 0xC003, 0xC004
-sweepn, result, keys, prev, pressed = 0xC005, 0xC006, 0xC007, 0xC008, 0xC009
+sweepn, keys, prev, pressed = 0xC005, 0xC007, 0xC008, 0xC009
 btk = 0xC00A                 # 2 bytes
 numbuf = 0xC00C              # 4 bytes
 repctr, running, sticky = 0xC010, 0xC011, 0xC012
@@ -34,6 +34,8 @@ unit, blen_fr = 0xC018, 0xC019          # unit: 0 = frames, 1 = ms
 duration, runcount = 0xC01A, 0xC01B     # burst length in bits, 0 = continuous
 gap, gapcount = 0xC01C, 0xC01D          # rest between bursts, 0 = single burst
 presetn = 0xC01E
+readings = 0xC01F                       # 2 bytes: FELT AT for ON SWEEP, then OFF SWEEP
+lastsel, gapn = 0xC021, 0xC022        # SELECT as the footer last drew it; gap slices left
 
 K_A, K_B, K_SEL, K_START = 0x01, 0x02, 0x04, 0x08
 K_RIGHT, K_LEFT, K_UP, K_DOWN = 0x10, 0x20, 0x40, 0x80
@@ -130,7 +132,9 @@ a.ld('a', 1).ld_abs_a(sweepn)
 a.ld('a', 64).ld_abs_a(duration)         # Pinball runs 64 frames
 a.xor('a').ld_abs_a(gap)
 a.xor('a').ld_abs_a(presetn)
-a.xor('a').ld_abs_a(result)
+a.xor('a').ld_abs_a(readings)
+a.xor('a').ld_abs_a(readings + 1)
+a.xor('a').ld_abs_a(keys)
 a.xor('a').ld_abs_a(prev)
 a.xor('a').ld_abs_a(running)
 a.xor('a').ld_abs_a(sticky)
@@ -146,6 +150,8 @@ a.call('waitframe')
 a.call('readkeys')
 a.xor('a').ld_abs_a(sticky)
 a.call('autorepeat')
+a.ld_a_abs(keys).and_(K_SEL).ld('b', 'a')
+a.ld_a_abs(lastsel).cp('b').call('draw_footer', 'nz')
 a.ld_a_abs(pressed).or_('a').jp('main', 'z')
 a.ld('b', 'a')
 a.ld_a_abs(keys).and_(K_SEL).jr('.normal', 'z')
@@ -361,11 +367,12 @@ a.call('delay')
 a.call('readkeys')
 a.ret()
 
-a.lab('delay_bits')                   # A = number of bit slots
+a.lab('delay_bits')                   # A = bit slots; NZ if A, B or START cut it short
 a.or_('a').ret('z')
 a.ld_abs_a(tmpB)
 a.lab('.l')
 a.call('delay_one_bit')
+a.ld_a_abs(sticky).and_(K_START | K_B | K_A).ret('nz')
 a.ld_a_abs(tmpB).dec('a').ld_abs_a(tmpB).jr('.l', 'nz')
 a.ret()
 
@@ -467,6 +474,17 @@ a.ld_a_abs(gapcount).dec('a').ld_abs_a(gapcount).jr('.gaploop', 'nz')
 a.jr('.burst')
 a.lab('.stop').call('motor_off').ret()
 
+a.lab('reading_addr')                 # HL = FELT AT for the current sweep mode
+a.ld_a_abs(mode).ld('l', 'a').ld('h', 0)
+a.ld16('de', readings - 1).add_hl('de')
+a.ret()
+
+a.lab('sweep_end')                    # A = keys that ended the run; A marks the step
+a.bit(0, 'a').jp('motor_off', 'z')
+a.call('reading_addr')
+a.ld_a_abs(sweepn).ld('hl', 'a')
+a.jp('motor_off')
+
 a.lab('run_on_sweep')
 a.ld('a', 1).ld_abs_a(sweepn)
 a.lab('.step')
@@ -478,19 +496,19 @@ a.call('prespin_do')
 a.call('sync_fr')
 a.call('motor_on')
 a.ld_a_abs(sweepn).call('delay_bits')
+a.jp('.key', 'nz')
 a.call('motor_off')
-for _ in range(4):
-    a.ld('a', 250).call('delay_ms')
-    a.ld_a_abs(sticky).and_(K_START | K_B).jp('.quit', 'nz')
+a.ld('a', 20).ld_abs_a(gapn)                 # 20 x 50 ms = the 1 s gap
+a.lab('.gap')
+a.ld('a', 50).call('delay_ms')
 a.call('readkeys')
+a.ld_a_abs(sticky).and_(K_START | K_B | K_A).jr('.key', 'nz')
+a.ld_a_abs(gapn).dec('a').ld_abs_a(gapn).jr('.gap', 'nz')
 a.ld_a_abs(tmpB2).dec('a').ld_abs_a(tmpB2).jr('.rep', 'nz')
-a.ld_a_abs(sticky)
-a.bit(0, 'a').jr('.felt', 'nz')
-a.and_(K_START | K_B).jr('.quit', 'nz')
 a.ld_a_abs(sweepn).inc('a').cp(33).jr('.ok', 'c').ld('a', 1)
 a.lab('.ok').ld_abs_a(sweepn)
 a.jr('.step')
-a.lab('.felt').ld_a_abs(sweepn).ld_abs_a(result)
+a.lab('.key').jp('sweep_end')
 a.lab('.quit').call('motor_off').ret()
 
 a.lab('run_off_sweep')
@@ -503,20 +521,19 @@ a.call('sync_fr')
 a.lab('.cyc')
 a.call('motor_on')
 a.ld('a', 8).call('delay_bits')
+a.jp('.key', 'nz')
 a.call('motor_off')
 a.ld_a_abs(sweepn).call('delay_bits')
-a.call('readkeys')
-a.ld_a_abs(sticky).and_(K_START | K_B).jp('.quit', 'nz')
+a.jp('.key', 'nz')
 a.ld_a_abs(tmpB2).dec('a').ld_abs_a(tmpB2).jr('.cyc', 'nz')
 a.call('motor_off')
 a.ld('a', 200).call('delay_ms')
-a.ld_a_abs(sticky)
-a.bit(0, 'a').jr('.felt', 'nz')
-a.and_(K_START | K_B).jr('.quit', 'nz')
+a.call('readkeys')
+a.ld_a_abs(sticky).and_(K_START | K_B | K_A).jr('.key', 'nz')
 a.ld_a_abs(sweepn).inc('a').cp(33).jr('.ok', 'c').ld('a', 1)
 a.lab('.ok').ld_abs_a(sweepn)
 a.jr('.step')
-a.lab('.felt').ld_a_abs(sweepn).ld_abs_a(result)
+a.lab('.key').jp('sweep_end')
 a.lab('.quit').call('motor_off').ret()
 
 # ---- text -------------------------------------------------------------
@@ -711,6 +728,7 @@ a.call('print_i')
 a.jr('.md')
 a.lab('.mn').call('print')
 a.lab('.md')
+a.inc16('de').call('print')
 
 # rows 4 and 5 swap between the pattern editor and the sweep readout
 pstr(1, 4, 's_c18')
@@ -745,9 +763,20 @@ a.call('print')
 a.ld_a_abs(sweepn).ld('l', 'a').ld('h', 0).call('num2buf')
 pnum(11, 4)
 pstr(1, 5, 's_felt')
-a.ld_a_abs(result).ld('l', 'a').ld('h', 0).call('num2buf')
+a.call('reading_addr')
+a.ld('a', 'hl').or_('a').jr('.rv', 'nz')
+pstr(12, 5, 's_none')
+a.jr('.cont')
+a.lab('.rv')
+a.ld_abs_a(tmpA)
+a.ld('l', 'a').ld('h', 0).call('num2buf')
 pnum(9, 5)
-pstr(14, 5, 's_bits')
+a.ld16('de', 's_bits')
+a.ld_a_abs(tmpA).cp(1).jr('.rp', 'nz')
+a.ld16('de', 's_bit')
+a.lab('.rp')
+ldhl(14, 5)
+a.call('print')
 
 a.lab('.cont')
 pstr(1, 7, 's_bit')
@@ -809,35 +838,50 @@ a.lab('.dblank')
 pstr(1, 10, 's_c18')
 a.lab('.dend')
 
-pdim(1, 12, 's_h1')
-a.ld_a_abs(mode).or_('a').jr('.ha1', 'nz')
-a.ld16('de', 's_aflip').jr('.hw')
-a.lab('.ha1').cp(3).jr('.ha2', 'nz')
-a.ld16('de', 's_ause').jr('.hw')
-a.lab('.ha2').ld16('de', 's_afelt')
-a.lab('.hw')
-ldhl(1, 13)
+# falls through into draw_footer
+
+a.lab('draw_footer')                  # rows 12, 14 and 16: what each button does now
+a.ld_a_abs(keys).and_(K_SEL).ld_abs_a(lastsel)
+a.ld_a_abs(running).or_('a').jr('.idle', 'z')
+pdim(1, 12, 's_f_stop')
+a.ld16('de', 's_c18')
+a.ld_a_abs(mode).dec('a').cp(2).jr('.r14', 'nc')   # sweeps are modes 1 and 2
+a.ld16('de', 's_f_felt')
+a.lab('.r14')
+ldhl(1, 14)
 a.call('print_d')
-pdim(13, 13, 's_bmode')
-pdim(1, 14, 's_h3')
-pdim(1, 15, 's_h4')
-a.call('burst_ok').jr('.h5s', 'z')
-a.ld16('de', 's_h5').jr('.h5w')
-a.lab('.h5s').ld16('de', 's_c18')
-a.lab('.h5w')
-ldhl(1, 16)
+pdim(1, 16, 's_c18')
+a.ret()
+a.lab('.idle')
+a.ld_a_abs(lastsel).or_('a').jr('.base', 'z')
+pdim(1, 12, 's_f_sel')
+a.ld16('de', 's_c18')
+a.call('burst_ok').jr('.s14', 'z')
+a.ld16('de', 's_f_burst')
+a.lab('.s14')
+ldhl(1, 14)
 a.call('print_d')
+pdim(1, 16, 's_c18')
+a.ret()
+a.lab('.base')
+pdim(1, 12, 's_f_base')
+a.ld_a_abs(mode).or_('a').jr('.b1', 'nz')
+pdim(1, 14, 's_f_flip')
+pdim(1, 16, 's_f_more_lr')
+a.ret()
+a.lab('.b1').cp(3).jr('.b2', 'nz')
+pdim(1, 14, 's_f_edit')
+a.jr('.b3')
+a.lab('.b2')
+pdim(1, 14, 's_f_bit')
+a.lab('.b3')
+pdim(1, 16, 's_f_more')
 a.ret()
 
 # ---- data -------------------------------------------------------------
 strings = {
     's_title': " RUMBLE PULSE TEST",
     's_mode': "MODE",
-    's_m0': "PATTERN  ",
-    's_m1': "ON SWEEP ",
-    's_m2': "OFF SWEEP",
-    's_m3': "PRESET   ",
-    's_ause': "A=USE IT   ",
     's_onbits': "ON BITS  ",
     's_offbits': "OFF BITS ",
     's_bit': "BIT",
@@ -850,20 +894,23 @@ strings = {
     's_on': "ON ",
     's_off': "OFF",
     's_runlbl': "RUN",
-    's_contv': "CONT           ",
+    's_contv': "CONT          ",
     's_gap': "GAP",
     's_felt': "FELT AT",
     's_bits': "BITS",
-    's_5sp': "     ",
-    's_7sp': "       ",
-    's_8sp': "        ",
-    's_h1': "START=RUN/STOP",
-    's_aflip': "A=FLIP BIT  ",
-    's_afelt': "A=I FEEL IT ",
-    's_bmode': "B=MODE",
-    's_h3': "UD=LEN    LR=MOVE",
-    's_h4': "SEL+A=UNIT +B=SPIN",
-    's_h5': "SEL+UD=RUN +LR=GAP",
+    's_none': "-",
+    # Footer rows fill all 18 columns, with the second item at column 13.
+    # '[' and ']' are the up/down and left/right arrows in font.py.
+    's_f_base': "START PLAY  B MODE",
+    's_f_flip': "A FLIP      [ BIT ",
+    's_f_edit': "A EDIT      [ PICK",
+    's_f_bit': "            [ BIT ",
+    's_f_more': "SELECT MORE       ",
+    's_f_more_lr': "SELECT MORE ] MOVE",
+    's_f_sel': "B PRESPIN   A UNIT",
+    's_f_burst': "[ RUN       ] GAP ",
+    's_f_stop': "START STOP        ",
+    's_f_felt': "A FELT IT         ",
     's_c18': "                  ",
     's_6sp': "      ",
 }
@@ -871,13 +918,20 @@ for k, v in strings.items():
     a.lab(k)
     a.ascii(v)
 
+# draw_all prints a mode name, then the blanks stored after it, so the 9-wide
+# field is written once and a run highlights only the name
+for k, v in (('s_m0', "PATTERN"), ('s_m1', "ON SWEEP"), ('s_m2', "OFF SWEEP"), ('s_m3', "PRESET")):
+    a.lab(k)
+    a.ascii(v)
+    a.ascii(' ' * (9 - len(v)))
+
 a.lab('presets')
 a.b(0x05, 8, 16)
 a.ascii('WALL HIT    ')
 a.b(0xFF, 3, 0)
 a.ascii('BUMPER      ')
 a.b(0x33, 8, 0)
-a.ascii('GENGAR BONUS')
+a.ascii('WIDE TICK   ')
 a.b(0x11, 8, 0)
 a.ascii('SLOW TICK   ')
 a.b(0x01, 8, 0)

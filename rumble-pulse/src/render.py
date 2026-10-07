@@ -63,6 +63,11 @@ def shot(name):
 os.makedirs(build.SHOT_DIR, exist_ok=True)
 assert until(labels['main']), "ROM never reached its main loop"
 shot('shot_pattern.png')
+gb.keys = 0x04
+run(300_000)
+shot('shot_select.png')
+gb.keys = 0
+run(300_000)
 # One sweep stands for both: OFF SWEEP differs only in its two labels.
 tap(0x02)
 shot('shot_onsweep.png')

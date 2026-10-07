@@ -13,9 +13,9 @@ to replay a patched pattern here before flashing it.
 
 ## Screen
 
-| PATTERN                                       | ON SWEEP                                       |
-| --------------------------------------------- | ---------------------------------------------- |
-| ![PATTERN mode](screenshots/shot_pattern.png) | ![ON SWEEP mode](screenshots/shot_onsweep.png) |
+| PATTERN                                       | PATTERN, SELECT held                                     | ON SWEEP                                       |
+| --------------------------------------------- | -------------------------------------------------------- | ---------------------------------------------- |
+| ![PATTERN mode](screenshots/shot_pattern.png) | ![PATTERN with SELECT held](screenshots/shot_select.png) | ![ON SWEEP mode](screenshots/shot_onsweep.png) |
 
 The pattern row is the eight bits with the byte in hex, so the setting on
 screen matches the byte a patch would write. Beneath it the same pattern is
@@ -23,24 +23,31 @@ drawn as a square wave, so a run of set bits reads as one wide pulse.
 
 In the sweep modes those rows become the step counter and `FELT AT`, `CYCLE`
 becomes `PULSE` or `REST` showing the current step in milliseconds, and the
-`RUN`/`GAP` row disappears, because burst length only governs PATTERN.
+`RUN`/`GAP` row disappears, because burst length only governs PATTERN and
+PRESET. `FELT AT` shows `-` until A marks a step, and each sweep keeps its own
+reading.
+
+The bottom panel lists only the buttons that do something in the current mode.
+Holding SELECT swaps in the SELECT combinations, and during a run it shows how
+to stop and, in a sweep, how to mark a step.
 
 ## Controls
 
-| Input               | Action                                                   |
-| ------------------- | -------------------------------------------------------- |
-| Left / Right        | Move the cursor along the 8-bit pattern                  |
-| A                   | Toggle the bit under the cursor (in sweeps: "I feel it") |
-| Up / Down           | Bit length, auto-repeats when held                       |
-| B                   | Cycle mode                                               |
-| SELECT + A          | Toggle unit (FR / MS)                                    |
-| SELECT + B          | Toggle PRESPIN                                           |
-| SELECT + Up/Down    | Burst length in bits, 0 = run until stopped              |
-| SELECT + Left/Right | Rest between bursts, 0 = one burst then stop             |
-| START               | Run / stop                                               |
+| Input               | Action                                                         |
+| ------------------- | -------------------------------------------------------------- |
+| Left / Right        | Move the cursor along the 8-bit pattern                        |
+| A                   | Toggle the bit under the cursor; in PRESET, edit it in PATTERN |
+| Up / Down           | Bit length, or the preset in PRESET; auto-repeats when held    |
+| B                   | Cycle mode                                                     |
+| SELECT + A          | Toggle unit (FR / MS)                                          |
+| SELECT + B          | Toggle PRESPIN                                                 |
+| SELECT + Up/Down    | Burst length in bits, 0 = run until stopped                    |
+| SELECT + Left/Right | Rest between bursts, 0 = one burst then stop                   |
+| START               | Play / stop                                                    |
 
-SELECT on its own does nothing; it is a modifier. While running, START or B
-stops, A marks the current sweep step into `FELT AT`.
+SELECT on its own only changes what the bottom panel lists. While running,
+START or B stops, and in a sweep A marks the current step into `FELT AT` and
+ends the run.
 
 ## Units
 
@@ -66,15 +73,14 @@ Pokemon Pinball's shipped pattern and duration; the last three are calibration
 references.
 
 The values come from the disassembly. Four of the names do too: WALL HIT,
-BUMPER, OPTION DEMO and PIKA SAVE. GENGAR BONUS, SLOW TICK and SPARSE TICK are
-labels for sites the disassembly leaves unnamed, so treat those three as
-descriptions of the waveform rather than of where it fires.
+BUMPER, OPTION DEMO and PIKA SAVE. WIDE TICK, SLOW TICK and SPARSE TICK describe
+the waveform of sites the disassembly leaves unnamed.
 
 | Preset       | Pattern | RUN  | GAP |
 | ------------ | ------- | ---- | --- |
 | WALL HIT     | `$05`   | 8    | 16  |
 | BUMPER       | `$FF`   | 3    | 0   |
-| GENGAR BONUS | `$33`   | 8    | 0   |
+| WIDE TICK    | `$33`   | 8    | 0   |
 | SLOW TICK    | `$11`   | 8    | 0   |
 | SPARSE TICK  | `$01`   | 8    | 0   |
 | OPTION DEMO  | `$55`   | 64   | 0   |
@@ -91,7 +97,7 @@ against `CONT` before reading anything into a short-burst result.
 
 **ON SWEEP** fires an isolated pulse four times per step with a 1 s gap,
 starting at 1 bit and growing one bit per step: 17, 34, 50, 67 ms at the
-default. A marks the first step felt. Wraps at 32. The full second between
+default. A marks the step felt and stops. Wraps at 32. The full second between
 pulses lets the motor stop, so each pulse is a clean cold start.
 
 **OFF SWEEP** is the inverse, for rest tolerance. The motor runs 8 bits on, then
@@ -111,7 +117,7 @@ Python 3 only; Pillow is needed just for the screenshot renderer.
 
 ```text
 python3 src/build.py    # -> rumble-pulse.gb
-python3 src/test.py     # boots it headless, asserts the rumble register timings
+python3 src/test.py     # boots it headless, asserts the rumble timings and sweep readings
 python3 src/render.py   # -> screenshots/shot_*.png straight out of the emulated VRAM
 ```
 
@@ -124,7 +130,7 @@ does not matter.
 | `src/sm83.py`   | SM83 opcode emitter: labels, local-label scoping, fixups                                                |
 | `src/font.py`   | 5x7 glyphs at tiles `$00-$3F`, box/wave at `$40-$4F`, inverted at `$50-$8F`, dim at `$90-$CF`, all 2bpp |
 | `src/emu.py`    | Headless SM83 interpreter covering the opcode subset the ROM uses                                       |
-| `src/test.py`   | Boots the ROM, drives the buttons, asserts the rumble register timings                                  |
+| `src/test.py`   | Boots the ROM, drives the buttons, asserts the rumble timings and sweep readings                        |
 | `src/render.py` | Renders the tile map to PNG, for checking layout without hardware                                       |
 
 `emu.py` logs every write to `$4000` with a cycle timestamp, so `test.py`
@@ -133,20 +139,25 @@ Run it after changing a delay path: it exits non-zero and names the segment that
 moved, before anything is flashed.
 
 The `CYCLE` figure on screen is derived from the rounded per-bit ms, so at 3
-frames it reads 400 where the true value is 402. Display only; playback is
-exact.
+frames it reads 400 where the true value is 402. Playback uses the exact
+timing.
 
 ### Changing things
 
-- **Layout**: the `draw_all` section near the bottom of `build.py`. `pstr`,
-  `pdim`, `pnum` and `ldhl` take tile coordinates; the frame is drawn once at
-  init by `draw_frame`, with section rules at rows 2, 6 and 11.
-- **Glyphs**: the `G` dict in `font.py`, 5 columns by 7 rows. Tiles are
-  generated for ASCII `$20-$5F` in four variants.
-- **Timing**: `delay_one_bit` picks between the VBlank path (frames) and the
-  timer path (milliseconds). `to_ticks` converts ms to 4096 Hz ticks.
-- **New opcodes**: add the emitter method to `sm83.py` and the matching case to
-  `emu.py`, or `test.py` stops with `unhandled opcode`.
+The layout is drawn by `draw_all` and `draw_footer` near the bottom of
+`build.py`. `pstr`, `pdim`, `pnum` and `ldhl` take tile coordinates, and
+`draw_frame` draws the frame once at init, with section rules at rows 2, 6 and
+11.
+
+Glyphs are the `G` dict in `font.py`, 5 columns by 7 rows, and tiles are
+generated for ASCII `$20-$5F` in four variants. `[` and `]` draw the up/down
+and left/right arrows the footer uses, the second 7 columns wide.
+
+`delay_one_bit` picks between the VBlank path (frames) and the timer path
+(milliseconds), and `to_ticks` converts ms to 4096 Hz ticks.
+
+A new opcode needs its emitter method in `sm83.py` and the matching case in
+`emu.py`, or `test.py` stops with `unhandled opcode`.
 
 ## Caveats
 
