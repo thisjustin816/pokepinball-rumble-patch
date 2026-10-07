@@ -35,7 +35,7 @@ duration, runcount = 0xC01A, 0xC01B     # burst length in bits, 0 = continuous
 gap, gapcount = 0xC01C, 0xC01D          # rest between bursts, 0 = single burst
 presetn = 0xC01E
 result_off = 0xC01F                     # OFF SWEEP's reading; result is ON SWEEP's
-lastsel, gapn = 0xC020, 0xC021        # SELECT as the footer last drew it; gap slices
+lastsel, gapn = 0xC020, 0xC021        # SELECT as the footer last drew it; gap slices left
 
 K_A, K_B, K_SEL, K_START = 0x01, 0x02, 0x04, 0x08
 K_RIGHT, K_LEFT, K_UP, K_DOWN = 0x10, 0x20, 0x40, 0x80
@@ -135,6 +135,8 @@ a.xor('a').ld_abs_a(presetn)
 a.xor('a').ld_abs_a(result)
 a.xor('a').ld_abs_a(result_off)
 a.xor('a').ld_abs_a(lastsel)
+a.xor('a').ld_abs_a(keys)
+a.xor('a').ld_abs_a(pressed)
 a.xor('a').ld_abs_a(prev)
 a.xor('a').ld_abs_a(running)
 a.xor('a').ld_abs_a(sticky)
@@ -378,6 +380,15 @@ a.call('delay_one_bit')
 a.ld_a_abs(tmpB).dec('a').ld_abs_a(tmpB).jr('.l', 'nz')
 a.ret()
 
+a.lab('delay_bits_k')                 # delay_bits, returning NZ early on A, B or START
+a.or_('a').ret('z')
+a.ld_abs_a(tmpB)
+a.lab('.l')
+a.call('delay_one_bit')
+a.ld_a_abs(sticky).and_(K_START | K_B | K_A).ret('nz')
+a.ld_a_abs(tmpB).dec('a').ld_abs_a(tmpB).jr('.l', 'nz')
+a.ret()
+
 a.lab('sync_fr')
 a.ld_a_abs(unit).or_('a').ret('nz')
 a.call('waitframe').ret()
@@ -478,7 +489,6 @@ a.lab('.stop').call('motor_off').ret()
 
 a.lab('run_on_sweep')
 a.ld('a', 1).ld_abs_a(sweepn)
-a.xor('a').ld_abs_a(result)
 a.lab('.step')
 a.call('draw_all')
 a.xor('a').ld_abs_a(sticky)
@@ -487,14 +497,15 @@ a.lab('.rep')
 a.call('prespin_do')
 a.call('sync_fr')
 a.call('motor_on')
-a.ld_a_abs(sweepn).call('delay_bits')
+a.ld_a_abs(sweepn).call('delay_bits_k')
+a.jp('.key', 'nz')
 a.call('motor_off')
 a.ld('a', 20).ld_abs_a(gapn)                 # 20 x 50 ms = the 1 s gap
 a.lab('.gap')
-a.ld_a_abs(sticky).and_(K_START | K_B | K_A).jr('.key', 'nz')
 a.ld('a', 50).call('delay_ms')
-a.ld_a_abs(gapn).dec('a').ld_abs_a(gapn).jr('.gap', 'nz')
+a.call('readkeys')
 a.ld_a_abs(sticky).and_(K_START | K_B | K_A).jr('.key', 'nz')
+a.ld_a_abs(gapn).dec('a').ld_abs_a(gapn).jr('.gap', 'nz')
 a.ld_a_abs(tmpB2).dec('a').ld_abs_a(tmpB2).jr('.rep', 'nz')
 a.ld_a_abs(sweepn).inc('a').cp(33).jr('.ok', 'c').ld('a', 1)
 a.lab('.ok').ld_abs_a(sweepn)
@@ -505,7 +516,6 @@ a.lab('.quit').call('motor_off').ret()
 
 a.lab('run_off_sweep')
 a.ld('a', 1).ld_abs_a(sweepn)
-a.xor('a').ld_abs_a(result_off)
 a.lab('.step')
 a.call('draw_all')
 a.xor('a').ld_abs_a(sticky)
@@ -513,14 +523,15 @@ a.ld('a', 8).ld_abs_a(tmpB2)
 a.call('sync_fr')
 a.lab('.cyc')
 a.call('motor_on')
-a.ld('a', 8).call('delay_bits')
+a.ld('a', 8).call('delay_bits_k')
+a.jp('.key', 'nz')
 a.call('motor_off')
-a.ld_a_abs(sweepn).call('delay_bits')
-a.call('readkeys')
-a.ld_a_abs(sticky).and_(K_START | K_B | K_A).jp('.key', 'nz')
+a.ld_a_abs(sweepn).call('delay_bits_k')
+a.jp('.key', 'nz')
 a.ld_a_abs(tmpB2).dec('a').ld_abs_a(tmpB2).jr('.cyc', 'nz')
 a.call('motor_off')
 a.ld('a', 200).call('delay_ms')
+a.call('readkeys')
 a.ld_a_abs(sticky).and_(K_START | K_B | K_A).jr('.key', 'nz')
 a.ld_a_abs(sweepn).inc('a').cp(33).jr('.ok', 'c').ld('a', 1)
 a.lab('.ok').ld_abs_a(sweepn)
@@ -715,15 +726,13 @@ a.lab('.m2').cp(2).jr('.m3', 'nz')
 a.ld16('de', 's_m2').jr('.mw')
 a.lab('.m3').ld16('de', 's_m3')
 a.lab('.mw')
-a.push('de')
-pstr(8, 3, 's_9sp')
-a.pop('de')
 ldhl(8, 3)
 a.ld_a_abs(running).or_('a').jr('.mn', 'z')
 a.call('print_i')
 a.jr('.md')
 a.lab('.mn').call('print')
 a.lab('.md')
+a.inc16('de').call('print')
 
 # rows 4 and 5 swap between the pattern editor and the sweep readout
 pstr(1, 4, 's_c18')
@@ -762,7 +771,7 @@ a.ld_a_abs(mode).cp(1).jr('.r1', 'nz')
 a.ld_a_abs(result).jr('.rh')
 a.lab('.r1').ld_a_abs(result_off)
 a.lab('.rh').or_('a').jr('.rv', 'nz')
-pstr(9, 5, 's_none')
+pstr(12, 5, 's_none')
 a.jr('.cont')
 a.lab('.rv')
 a.ld_abs_a(tmpA)
@@ -834,49 +843,59 @@ a.lab('.dblank')
 pstr(1, 10, 's_c18')
 a.lab('.dend')
 
-a.call('draw_footer')
-a.ret()
+# falls through into draw_footer
 
 a.lab('draw_footer')                  # rows 12, 14 and 16: what each button does now
-for ry in (12, 14, 16):
-    pdim(1, ry, 's_c18')
+a.ld_a_abs(keys).and_(K_SEL).ld_abs_a(lastsel)
 a.ld_a_abs(running).or_('a').jr('.idle', 'z')
 pdim(1, 12, 's_f_stop')
-a.ld_a_abs(mode).dec('a').cp(2).ret('nc')     # sweeps are modes 1 and 2
-pdim(1, 14, 's_f_felt')
+a.ld16('de', 's_c18')
+a.ld_a_abs(mode).dec('a').cp(2).jr('.r14', 'nc')   # sweeps are modes 1 and 2
+a.ld16('de', 's_f_felt')
+a.lab('.r14')
+ldhl(1, 14)
+a.call('print_d')
+pdim(1, 16, 's_c18')
 a.ret()
 a.lab('.idle')
-a.ld_a_abs(keys).and_(K_SEL).jr('.base', 'z')
-pdim(1, 12, 's_f_spin')
-pdim(13, 12, 's_f_unit')
-a.call('burst_ok').ret('z')
-pdim(1, 14, 's_f_run')
-pdim(13, 14, 's_f_gap')
+a.ld_a_abs(lastsel).or_('a').jr('.base', 'z')
+pdim(1, 12, 's_f_sel')
+a.ld16('de', 's_c18')
+a.call('burst_ok').jr('.s14', 'z')
+a.ld16('de', 's_f_burst')
+a.lab('.s14')
+ldhl(1, 14)
+a.call('print_d')
+pdim(1, 16, 's_c18')
 a.ret()
 a.lab('.base')
-pdim(1, 12, 's_f_play')
-pdim(13, 12, 's_f_mode')
-pdim(1, 16, 's_f_more')
+pdim(1, 12, 's_f_base')
 a.ld_a_abs(mode).or_('a').jr('.b1', 'nz')
 pdim(1, 14, 's_f_flip')
-pdim(13, 14, 's_f_bit')
+pdim(1, 16, 's_f_more_lr')
 a.ret()
 a.lab('.b1').cp(3).jr('.b2', 'nz')
 pdim(1, 14, 's_f_edit')
-pdim(13, 14, 's_f_pick')
-a.ret()
+a.jr('.b3')
 a.lab('.b2')
-pdim(13, 14, 's_f_bit')
+pdim(1, 14, 's_f_bit')
+a.lab('.b3')
+pdim(1, 16, 's_f_more')
 a.ret()
 
 # ---- data -------------------------------------------------------------
 strings = {
     's_title': " RUMBLE PULSE TEST",
     's_mode': "MODE",
+    # each mode name is followed by the padding that fills its 9-wide field
     's_m0': "PATTERN",
+    's_m0p': "  ",
     's_m1': "ON SWEEP",
+    's_m1p': " ",
     's_m2': "OFF SWEEP",
+    's_m2p': "",
     's_m3': "PRESET",
+    's_m3p': "   ",
     's_onbits': "ON BITS  ",
     's_offbits': "OFF BITS ",
     's_bit': "BIT",
@@ -893,23 +912,20 @@ strings = {
     's_gap': "GAP",
     's_felt': "FELT AT",
     's_bits': "BITS",
-    's_bit1': "BIT ",
-    's_none': "   -      ",
-    's_9sp': "         ",
-    # '[' and ']' are the up/down and left/right arrows in font.py
-    's_f_play': "START PLAY",
-    's_f_stop': "START STOP",
-    's_f_mode': "B MODE",
-    's_f_flip': "A FLIP",
-    's_f_edit': "A EDIT",
-    's_f_felt': "A FELT IT",
-    's_f_bit': "[ BIT",
-    's_f_pick': "[ PICK",
-    's_f_more': "SELECT MORE",
-    's_f_spin': "B PRESPIN",
-    's_f_unit': "A UNIT",
-    's_f_run': "[ RUN",
-    's_f_gap': "] GAP",
+    's_bit1': "BIT",
+    's_none': "-",
+    # Footer rows fill all 18 columns, with the second item at column 13.
+    # '[' and ']' are the up/down and left/right arrows in font.py.
+    's_f_base': "START PLAY  B MODE",
+    's_f_flip': "A FLIP      [ BIT ",
+    's_f_edit': "A EDIT      [ PICK",
+    's_f_bit': "            [ BIT ",
+    's_f_more': "SELECT MORE       ",
+    's_f_more_lr': "SELECT MORE ] MOVE",
+    's_f_sel': "B PRESPIN   A UNIT",
+    's_f_burst': "[ RUN       ] GAP ",
+    's_f_stop': "START STOP        ",
+    's_f_felt': "A FELT IT         ",
     's_c18': "                  ",
     's_6sp': "      ",
 }
