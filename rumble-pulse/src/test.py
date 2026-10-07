@@ -18,20 +18,20 @@ BUMPER_PULSE_MS = 50.3
 # A sweep checks for A after every bit and every 50 ms slice of its gap.
 FELT_ANSWER_MS = 100
 
-# WRAM offsets from 0xC000, matching build.py.
-PATTERN, CURSOR, MODE, RESULT_ON, KEYS = 0x00, 0x01, 0x03, 0x06, 0x07
-RUNNING, DURATION, GAP, RESULT_OFF = 0x11, 0x1A, 0x1C, 0x1F
-
-# Tile map cells: the last digit of FELT AT, and the footer's first letter.
-FELT_AT_CELL = 0x1800 + 5 * 32 + 12
-FOOTER_CELL = 0x1800 + 12 * 32 + 1
+# WRAM offsets from 0xC000 and tile map offsets from 0x8000, taken from build.py.
+PATTERN, CURSOR, MODE, KEYS = (v - 0xC000 for v in (build.pattern, build.cursor, build.mode, build.keys))
+RUNNING, DURATION, GAP = (v - 0xC000 for v in (build.running, build.duration, build.gap))
+RESULT_ON = build.readings - 0xC000
+RESULT_OFF = RESULT_ON + 1
+FELT_AT_CELL = build.MAP(12, 5) - 0x8000     # last digit of FELT AT
+FOOTER_CELL = build.MAP(1, 12) - 0x8000      # footer's first letter
 
 labels = build.a.labels
 
 
-def dim(ch):
-    """The footer's tile for a character."""
-    return ord(ch) - 0x20 + 0x90
+def tile(ch, base=0x00):
+    """The tile for a character; the footer's dim set starts at 0x90."""
+    return ord(ch) - 0x20 + base
 
 
 # WRAM powers up random on hardware and zeroed here, so plant SELECT in the
@@ -40,7 +40,7 @@ gb = GB(build.a.rom)
 gb.wram[KEYS] = 0xFF
 while gb.vram[FOOTER_CELL] == 0 and gb.cyc < 4_000_000:
     gb.step()
-assert gb.vram[FOOTER_CELL] == dim('S'), "boot drew the SELECT footer from stale key state"
+assert gb.vram[FOOTER_CELL] == tile('S', 0x90), "boot drew the SELECT footer from stale key state"
 
 gb = GB(build.a.rom)
 
@@ -93,6 +93,13 @@ def segments():
 
 def close_to(measured, expected, tolerance=0.5):
     return abs(measured - expected) <= tolerance
+
+
+def start_run(seconds):
+    """Press START and let the run go for the given time."""
+    tap(0x08, 200_000, 100_000)
+    run(int(CYCLES_PER_SECOND * seconds))
+    assert gb.wram[RUNNING], "the run stopped on its own"
 
 
 assert until(labels['main']), "ROM never reached its main loop"
@@ -156,9 +163,7 @@ print("bumper: %d transitions, on %.1f ms" % (len(gb.log), bumper[0][1]))
 # ON SWEEP: A in the first step's gap records step 1 and ends the run.
 tap(0x02)
 assert gb.wram[MODE] == 1, "B did not switch to ON SWEEP"
-tap(0x08, 200_000, 100_000)
-run(int(CYCLES_PER_SECOND * 1.5))
-assert gb.wram[RUNNING], "ON SWEEP stopped before A was pressed"
+start_run(0.3)
 start = gb.cyc
 gb.keys = 0x01
 while gb.wram[RUNNING] and gb.cyc - start < int(CYCLES_PER_SECOND * 5):
@@ -169,36 +174,33 @@ assert answer_ms <= FELT_ANSWER_MS, \
     "ON SWEEP took %.0f ms to answer A, not under %d" % (answer_ms, FELT_ANSWER_MS)
 assert gb.wram[RESULT_ON] == 1, "FELT AT is %d, not step 1" % gb.wram[RESULT_ON]
 run(400_000)
-assert gb.vram[FELT_AT_CELL] == ord('1') - 0x20, "FELT AT does not show 1"
+assert gb.vram[FELT_AT_CELL] == tile('1'), "FELT AT does not show 1"
 print("on sweep: A answered in %.0f ms, felt at step %d" % (answer_ms, gb.wram[RESULT_ON]))
 
 # OFF SWEEP keeps its own reading, so it shows none yet.
 tap(0x02)
 assert gb.wram[MODE] == 2, "B did not switch to OFF SWEEP"
 assert gb.wram[RESULT_OFF] == 0, "OFF SWEEP starts with a reading of %d" % gb.wram[RESULT_OFF]
-assert gb.vram[FELT_AT_CELL] == ord('-') - 0x20, "OFF SWEEP shows a reading it never took"
+assert gb.vram[FELT_AT_CELL] == tile('-'), "OFF SWEEP shows a reading it never took"
 print("off sweep: no reading shown")
 
 # OFF SWEEP marked in its second step keeps that reading apart from ON SWEEP's.
-tap(0x08, 200_000, 100_000)
-run(int(CYCLES_PER_SECOND * 2.0))
-assert gb.wram[RUNNING], "OFF SWEEP stopped before A was pressed"
+start_run(1.6)
 tap(0x01, 200_000, 400_000)
 assert not gb.wram[RUNNING], "A did not end OFF SWEEP"
 assert gb.wram[RESULT_OFF] == 2, "OFF SWEEP's FELT AT is %d, not step 2" % gb.wram[RESULT_OFF]
 assert gb.wram[RESULT_ON] == 1, "OFF SWEEP changed ON SWEEP's reading to %d" % gb.wram[RESULT_ON]
-assert gb.vram[FELT_AT_CELL] == ord('2') - 0x20, "OFF SWEEP's FELT AT does not show 2"
+assert gb.vram[FELT_AT_CELL] == tile('2'), "OFF SWEEP's FELT AT does not show 2"
 print("off sweep: felt at step %d" % gb.wram[RESULT_OFF])
 
 # Back to ON SWEEP: a run stopped with START keeps the reading it had.
 while gb.wram[MODE] != 1:
     tap(0x02)
-tap(0x08, 200_000, 100_000)
-run(int(CYCLES_PER_SECOND * 0.5))
+start_run(0.1)
 tap(0x08, 200_000, 400_000)
 assert not gb.wram[RUNNING], "START did not stop ON SWEEP"
 assert gb.wram[RESULT_ON] == 1, "stopping ON SWEEP changed its reading to %d" % gb.wram[RESULT_ON]
-assert gb.vram[FELT_AT_CELL] == ord('1') - 0x20, "stopping ON SWEEP cleared FELT AT"
+assert gb.vram[FELT_AT_CELL] == tile('1'), "stopping ON SWEEP cleared FELT AT"
 print("on sweep: a stopped run kept step %d" % gb.wram[RESULT_ON])
 
 print("all timings within tolerance")

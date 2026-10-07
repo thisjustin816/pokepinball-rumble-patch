@@ -25,7 +25,7 @@ RUMBLE = 0x4000
 
 # ---- WRAM -------------------------------------------------------------
 pattern, cursor, blen_ms, mode, prespin = 0xC000, 0xC001, 0xC002, 0xC003, 0xC004
-sweepn, result, keys, prev, pressed = 0xC005, 0xC006, 0xC007, 0xC008, 0xC009
+sweepn, keys, prev, pressed = 0xC005, 0xC007, 0xC008, 0xC009
 btk = 0xC00A                 # 2 bytes
 numbuf = 0xC00C              # 4 bytes
 repctr, running, sticky = 0xC010, 0xC011, 0xC012
@@ -34,8 +34,8 @@ unit, blen_fr = 0xC018, 0xC019          # unit: 0 = frames, 1 = ms
 duration, runcount = 0xC01A, 0xC01B     # burst length in bits, 0 = continuous
 gap, gapcount = 0xC01C, 0xC01D          # rest between bursts, 0 = single burst
 presetn = 0xC01E
-result_off = 0xC01F                     # OFF SWEEP's reading; result is ON SWEEP's
-lastsel, gapn = 0xC020, 0xC021        # SELECT as the footer last drew it; gap slices left
+readings = 0xC01F                       # 2 bytes: FELT AT for ON SWEEP, then OFF SWEEP
+lastsel, gapn = 0xC021, 0xC022        # SELECT as the footer last drew it; gap slices left
 
 K_A, K_B, K_SEL, K_START = 0x01, 0x02, 0x04, 0x08
 K_RIGHT, K_LEFT, K_UP, K_DOWN = 0x10, 0x20, 0x40, 0x80
@@ -132,11 +132,9 @@ a.ld('a', 1).ld_abs_a(sweepn)
 a.ld('a', 64).ld_abs_a(duration)         # Pinball runs 64 frames
 a.xor('a').ld_abs_a(gap)
 a.xor('a').ld_abs_a(presetn)
-a.xor('a').ld_abs_a(result)
-a.xor('a').ld_abs_a(result_off)
-a.xor('a').ld_abs_a(lastsel)
+a.xor('a').ld_abs_a(readings)
+a.xor('a').ld_abs_a(readings + 1)
 a.xor('a').ld_abs_a(keys)
-a.xor('a').ld_abs_a(pressed)
 a.xor('a').ld_abs_a(prev)
 a.xor('a').ld_abs_a(running)
 a.xor('a').ld_abs_a(sticky)
@@ -153,10 +151,7 @@ a.call('readkeys')
 a.xor('a').ld_abs_a(sticky)
 a.call('autorepeat')
 a.ld_a_abs(keys).and_(K_SEL).ld('b', 'a')
-a.ld_a_abs(lastsel).cp('b').jr('.samesel', 'z')
-a.ld('a', 'b').ld_abs_a(lastsel)
-a.call('draw_footer')
-a.lab('.samesel')
+a.ld_a_abs(lastsel).cp('b').call('draw_footer', 'nz')
 a.ld_a_abs(pressed).or_('a').jp('main', 'z')
 a.ld('b', 'a')
 a.ld_a_abs(keys).and_(K_SEL).jr('.normal', 'z')
@@ -372,15 +367,7 @@ a.call('delay')
 a.call('readkeys')
 a.ret()
 
-a.lab('delay_bits')                   # A = number of bit slots
-a.or_('a').ret('z')
-a.ld_abs_a(tmpB)
-a.lab('.l')
-a.call('delay_one_bit')
-a.ld_a_abs(tmpB).dec('a').ld_abs_a(tmpB).jr('.l', 'nz')
-a.ret()
-
-a.lab('delay_bits_k')                 # delay_bits, returning NZ early on A, B or START
+a.lab('delay_bits')                   # A = bit slots; NZ if A, B or START cut it short
 a.or_('a').ret('z')
 a.ld_abs_a(tmpB)
 a.lab('.l')
@@ -487,6 +474,17 @@ a.ld_a_abs(gapcount).dec('a').ld_abs_a(gapcount).jr('.gaploop', 'nz')
 a.jr('.burst')
 a.lab('.stop').call('motor_off').ret()
 
+a.lab('reading_addr')                 # HL = FELT AT for the current sweep mode
+a.ld_a_abs(mode).ld('l', 'a').ld('h', 0)
+a.ld16('de', readings - 1).add_hl('de')
+a.ret()
+
+a.lab('sweep_end')                    # A = keys that ended the run; A marks the step
+a.bit(0, 'a').jp('motor_off', 'z')
+a.call('reading_addr')
+a.ld_a_abs(sweepn).ld('hl', 'a')
+a.jp('motor_off')
+
 a.lab('run_on_sweep')
 a.ld('a', 1).ld_abs_a(sweepn)
 a.lab('.step')
@@ -497,7 +495,7 @@ a.lab('.rep')
 a.call('prespin_do')
 a.call('sync_fr')
 a.call('motor_on')
-a.ld_a_abs(sweepn).call('delay_bits_k')
+a.ld_a_abs(sweepn).call('delay_bits')
 a.jp('.key', 'nz')
 a.call('motor_off')
 a.ld('a', 20).ld_abs_a(gapn)                 # 20 x 50 ms = the 1 s gap
@@ -510,8 +508,7 @@ a.ld_a_abs(tmpB2).dec('a').ld_abs_a(tmpB2).jr('.rep', 'nz')
 a.ld_a_abs(sweepn).inc('a').cp(33).jr('.ok', 'c').ld('a', 1)
 a.lab('.ok').ld_abs_a(sweepn)
 a.jr('.step')
-a.lab('.key').bit(0, 'a').jr('.quit', 'z')
-a.ld_a_abs(sweepn).ld_abs_a(result)
+a.lab('.key').jp('sweep_end')
 a.lab('.quit').call('motor_off').ret()
 
 a.lab('run_off_sweep')
@@ -523,10 +520,10 @@ a.ld('a', 8).ld_abs_a(tmpB2)
 a.call('sync_fr')
 a.lab('.cyc')
 a.call('motor_on')
-a.ld('a', 8).call('delay_bits_k')
+a.ld('a', 8).call('delay_bits')
 a.jp('.key', 'nz')
 a.call('motor_off')
-a.ld_a_abs(sweepn).call('delay_bits_k')
+a.ld_a_abs(sweepn).call('delay_bits')
 a.jp('.key', 'nz')
 a.ld_a_abs(tmpB2).dec('a').ld_abs_a(tmpB2).jr('.cyc', 'nz')
 a.call('motor_off')
@@ -536,8 +533,7 @@ a.ld_a_abs(sticky).and_(K_START | K_B | K_A).jr('.key', 'nz')
 a.ld_a_abs(sweepn).inc('a').cp(33).jr('.ok', 'c').ld('a', 1)
 a.lab('.ok').ld_abs_a(sweepn)
 a.jr('.step')
-a.lab('.key').bit(0, 'a').jr('.quit', 'z')
-a.ld_a_abs(sweepn).ld_abs_a(result_off)
+a.lab('.key').jp('sweep_end')
 a.lab('.quit').call('motor_off').ret()
 
 # ---- text -------------------------------------------------------------
@@ -767,21 +763,20 @@ a.call('print')
 a.ld_a_abs(sweepn).ld('l', 'a').ld('h', 0).call('num2buf')
 pnum(11, 4)
 pstr(1, 5, 's_felt')
-a.ld_a_abs(mode).cp(1).jr('.r1', 'nz')
-a.ld_a_abs(result).jr('.rh')
-a.lab('.r1').ld_a_abs(result_off)
-a.lab('.rh').or_('a').jr('.rv', 'nz')
+a.call('reading_addr')
+a.ld('a', 'hl').or_('a').jr('.rv', 'nz')
 pstr(12, 5, 's_none')
 a.jr('.cont')
 a.lab('.rv')
 a.ld_abs_a(tmpA)
 a.ld('l', 'a').ld('h', 0).call('num2buf')
 pnum(9, 5)
+a.ld16('de', 's_bits')
 a.ld_a_abs(tmpA).cp(1).jr('.rp', 'nz')
-pstr(14, 5, 's_bit1')
-a.jr('.cont')
+a.ld16('de', 's_bit')
 a.lab('.rp')
-pstr(14, 5, 's_bits')
+ldhl(14, 5)
+a.call('print')
 
 a.lab('.cont')
 pstr(1, 7, 's_bit')
@@ -887,15 +882,6 @@ a.ret()
 strings = {
     's_title': " RUMBLE PULSE TEST",
     's_mode': "MODE",
-    # each mode name is followed by the padding that fills its 9-wide field
-    's_m0': "PATTERN",
-    's_m0p': "  ",
-    's_m1': "ON SWEEP",
-    's_m1p': " ",
-    's_m2': "OFF SWEEP",
-    's_m2p': "",
-    's_m3': "PRESET",
-    's_m3p': "   ",
     's_onbits': "ON BITS  ",
     's_offbits': "OFF BITS ",
     's_bit': "BIT",
@@ -912,7 +898,6 @@ strings = {
     's_gap': "GAP",
     's_felt': "FELT AT",
     's_bits': "BITS",
-    's_bit1': "BIT",
     's_none': "-",
     # Footer rows fill all 18 columns, with the second item at column 13.
     # '[' and ']' are the up/down and left/right arrows in font.py.
@@ -932,6 +917,13 @@ strings = {
 for k, v in strings.items():
     a.lab(k)
     a.ascii(v)
+
+# draw_all prints a mode name, then the blanks stored after it, so the 9-wide
+# field is written once and a run highlights only the name
+for k, v in (('s_m0', "PATTERN"), ('s_m1', "ON SWEEP"), ('s_m2', "OFF SWEEP"), ('s_m3', "PRESET")):
+    a.lab(k)
+    a.ascii(v)
+    a.ascii(' ' * (9 - len(v)))
 
 a.lab('presets')
 a.b(0x05, 8, 16)
