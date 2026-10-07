@@ -15,9 +15,15 @@ FRAME_MS = 16.742
 # assertion and its message together.
 WALL_REST_MS = 368.2
 BUMPER_PULSE_MS = 50.3
+# A sweep checks for A between 50 ms slices of its gap.
+FELT_ANSWER_MS = 100
 
 # WRAM offsets from 0xC000, matching build.py.
-PATTERN, CURSOR, DURATION, GAP = 0x00, 0x01, 0x1A, 0x1C
+PATTERN, CURSOR, MODE, RESULT_ON = 0x00, 0x01, 0x03, 0x06
+RUNNING, DURATION, GAP, RESULT_OFF = 0x11, 0x1A, 0x1C, 0x1F
+
+# The tile map cell under the last digit of FELT AT, row 5 column 12.
+FELT_AT_CELL = 0x1800 + 5 * 32 + 12
 
 gb = GB(build.a.rom)
 labels = build.a.labels
@@ -130,5 +136,31 @@ assert bumper[0][0], "the bumper pulse did not start with the motor on"
 assert close_to(bumper[0][1], BUMPER_PULSE_MS), \
     "the bumper pulse is %.1f ms, not %.1f" % (bumper[0][1], BUMPER_PULSE_MS)
 print("bumper: %d transitions, on %.1f ms" % (len(gb.log), bumper[0][1]))
+
+# ON SWEEP: A in the first step's gap records step 1 and ends the run.
+tap(0x02)
+assert gb.wram[MODE] == 1, "B did not switch to ON SWEEP"
+tap(0x08, 200_000, 100_000)
+run(int(CYCLES_PER_SECOND * 1.5))
+assert gb.wram[RUNNING], "ON SWEEP stopped before A was pressed"
+start = gb.cyc
+gb.keys = 0x01
+while gb.wram[RUNNING] and gb.cyc - start < int(CYCLES_PER_SECOND * 5):
+    gb.step()
+gb.keys = 0
+answer_ms = (gb.cyc - start) / CYCLES_PER_SECOND * 1000
+assert answer_ms <= FELT_ANSWER_MS, \
+    "ON SWEEP took %.0f ms to answer A, not under %d" % (answer_ms, FELT_ANSWER_MS)
+assert gb.wram[RESULT_ON] == 1, "FELT AT is %d, not step 1" % gb.wram[RESULT_ON]
+run(400_000)
+assert gb.vram[FELT_AT_CELL] == ord('1') - 0x20, "FELT AT does not show 1"
+print("on sweep: A answered in %.0f ms, felt at step %d" % (answer_ms, gb.wram[RESULT_ON]))
+
+# OFF SWEEP keeps its own reading, so it shows none yet.
+tap(0x02)
+assert gb.wram[MODE] == 2, "B did not switch to OFF SWEEP"
+assert gb.wram[RESULT_OFF] == 0, "OFF SWEEP starts with a reading of %d" % gb.wram[RESULT_OFF]
+assert gb.vram[FELT_AT_CELL] == ord('-') - 0x20, "OFF SWEEP shows a reading it never took"
+print("off sweep: no reading shown")
 
 print("all timings within tolerance")

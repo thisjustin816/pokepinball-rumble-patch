@@ -13,6 +13,10 @@ G = {
     '^': ["00100", "01010", "10001", "00000", "00000", "00000", "00000"],
     '>': ["10000", "01000", "00100", "00010", "00100", "01000", "10000"],
     '<': ["00001", "00010", "00100", "01000", "00100", "00010", "00001"],
+    # The font has no use for brackets, so their codes carry the d-pad arrows
+    # the footer pairs with UP/DOWN and LEFT/RIGHT. LEFT/RIGHT needs 7 columns.
+    '[': ["00100", "01110", "11111", "00000", "11111", "01110", "00100"],
+    ']': ["0000000", "0010100", "0110110", "1110111", "0110110", "0010100", "0000000"],
     '0': ["01110", "10001", "10011", "10101", "11001", "10001", "01110"],
     '1': ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
     '2': ["01110", "10001", "00001", "00010", "00100", "01000", "11111"],
@@ -90,7 +94,7 @@ BOX = [
     ["00000000"]*8,
 ]
 
-# shade per box tile: frame mid-grey, waveform black, section rules light
+# shade per box tile: frame mid-gray, waveform black, section rules light
 BOX_SHADE = [2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 2, 0, 0, 0]
 
 
@@ -121,7 +125,7 @@ def _grid(ch):
     rows = G.get(ch, ["00000"] * 7)
     g = [[0] * 8 for _ in range(8)]
     for y in range(7):
-        for x in range(5):
+        for x in range(len(rows[y])):
             if rows[y][x] == '1':
                 g[y][x] = 1
     return g
@@ -141,7 +145,7 @@ def tiles():
 
 
 def box_tiles():
-    """$40-$4F: frame rules in dark grey, waveform in black."""
+    """$40-$4F: frame rules in dark gray, waveform in black."""
     out = bytearray()
     for i, rows in enumerate(BOX):
         shade = BOX_SHADE[i]
@@ -163,7 +167,7 @@ def inv_tiles():
 
 
 def dim_tiles():
-    """$90-$CF: the same glyphs in mid-grey, for secondary text."""
+    """$90-$CF: the same glyphs in mid-gray, for secondary text."""
     out = bytearray()
     for code in range(0x20, 0x60):
         out += _encode(_shade(_grid(chr(code)), on=2, off=0))

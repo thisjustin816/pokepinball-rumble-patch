@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Assemble RUMBLE PULSE TEST into a 32 KiB MBC5+RUMBLE .gb image.
 
-Bit length is expressed in LCD frames by default -- the only cadence a real
-game can produce from a VBlank handler -- with an optional millisecond mode
+Bit length is expressed in LCD frames by default, the only cadence a real
+game can produce from a VBlank handler, with an optional millisecond mode
 for sub-frame threshold hunting.
 """
 
@@ -34,6 +34,8 @@ unit, blen_fr = 0xC018, 0xC019          # unit: 0 = frames, 1 = ms
 duration, runcount = 0xC01A, 0xC01B     # burst length in bits, 0 = continuous
 gap, gapcount = 0xC01C, 0xC01D          # rest between bursts, 0 = single burst
 presetn = 0xC01E
+result_off = 0xC01F                     # OFF SWEEP's reading; result is ON SWEEP's
+lastsel, gapn = 0xC020, 0xC021        # SELECT as the footer last drew it; gap slices
 
 K_A, K_B, K_SEL, K_START = 0x01, 0x02, 0x04, 0x08
 K_RIGHT, K_LEFT, K_UP, K_DOWN = 0x10, 0x20, 0x40, 0x80
@@ -131,6 +133,8 @@ a.ld('a', 64).ld_abs_a(duration)         # Pinball runs 64 frames
 a.xor('a').ld_abs_a(gap)
 a.xor('a').ld_abs_a(presetn)
 a.xor('a').ld_abs_a(result)
+a.xor('a').ld_abs_a(result_off)
+a.xor('a').ld_abs_a(lastsel)
 a.xor('a').ld_abs_a(prev)
 a.xor('a').ld_abs_a(running)
 a.xor('a').ld_abs_a(sticky)
@@ -146,6 +150,11 @@ a.call('waitframe')
 a.call('readkeys')
 a.xor('a').ld_abs_a(sticky)
 a.call('autorepeat')
+a.ld_a_abs(keys).and_(K_SEL).ld('b', 'a')
+a.ld_a_abs(lastsel).cp('b').jr('.samesel', 'z')
+a.ld('a', 'b').ld_abs_a(lastsel)
+a.call('draw_footer')
+a.lab('.samesel')
 a.ld_a_abs(pressed).or_('a').jp('main', 'z')
 a.ld('b', 'a')
 a.ld_a_abs(keys).and_(K_SEL).jr('.normal', 'z')
@@ -469,6 +478,7 @@ a.lab('.stop').call('motor_off').ret()
 
 a.lab('run_on_sweep')
 a.ld('a', 1).ld_abs_a(sweepn)
+a.xor('a').ld_abs_a(result)
 a.lab('.step')
 a.call('draw_all')
 a.xor('a').ld_abs_a(sticky)
@@ -479,22 +489,23 @@ a.call('sync_fr')
 a.call('motor_on')
 a.ld_a_abs(sweepn).call('delay_bits')
 a.call('motor_off')
-for _ in range(4):
-    a.ld('a', 250).call('delay_ms')
-    a.ld_a_abs(sticky).and_(K_START | K_B).jp('.quit', 'nz')
-a.call('readkeys')
+a.ld('a', 20).ld_abs_a(gapn)                 # 20 x 50 ms = the 1 s gap
+a.lab('.gap')
+a.ld_a_abs(sticky).and_(K_START | K_B | K_A).jr('.key', 'nz')
+a.ld('a', 50).call('delay_ms')
+a.ld_a_abs(gapn).dec('a').ld_abs_a(gapn).jr('.gap', 'nz')
+a.ld_a_abs(sticky).and_(K_START | K_B | K_A).jr('.key', 'nz')
 a.ld_a_abs(tmpB2).dec('a').ld_abs_a(tmpB2).jr('.rep', 'nz')
-a.ld_a_abs(sticky)
-a.bit(0, 'a').jr('.felt', 'nz')
-a.and_(K_START | K_B).jr('.quit', 'nz')
 a.ld_a_abs(sweepn).inc('a').cp(33).jr('.ok', 'c').ld('a', 1)
 a.lab('.ok').ld_abs_a(sweepn)
 a.jr('.step')
-a.lab('.felt').ld_a_abs(sweepn).ld_abs_a(result)
+a.lab('.key').bit(0, 'a').jr('.quit', 'z')
+a.ld_a_abs(sweepn).ld_abs_a(result)
 a.lab('.quit').call('motor_off').ret()
 
 a.lab('run_off_sweep')
 a.ld('a', 1).ld_abs_a(sweepn)
+a.xor('a').ld_abs_a(result_off)
 a.lab('.step')
 a.call('draw_all')
 a.xor('a').ld_abs_a(sticky)
@@ -506,17 +517,16 @@ a.ld('a', 8).call('delay_bits')
 a.call('motor_off')
 a.ld_a_abs(sweepn).call('delay_bits')
 a.call('readkeys')
-a.ld_a_abs(sticky).and_(K_START | K_B).jp('.quit', 'nz')
+a.ld_a_abs(sticky).and_(K_START | K_B | K_A).jp('.key', 'nz')
 a.ld_a_abs(tmpB2).dec('a').ld_abs_a(tmpB2).jr('.cyc', 'nz')
 a.call('motor_off')
 a.ld('a', 200).call('delay_ms')
-a.ld_a_abs(sticky)
-a.bit(0, 'a').jr('.felt', 'nz')
-a.and_(K_START | K_B).jr('.quit', 'nz')
+a.ld_a_abs(sticky).and_(K_START | K_B | K_A).jr('.key', 'nz')
 a.ld_a_abs(sweepn).inc('a').cp(33).jr('.ok', 'c').ld('a', 1)
 a.lab('.ok').ld_abs_a(sweepn)
 a.jr('.step')
-a.lab('.felt').ld_a_abs(sweepn).ld_abs_a(result)
+a.lab('.key').bit(0, 'a').jr('.quit', 'z')
+a.ld_a_abs(sweepn).ld_abs_a(result_off)
 a.lab('.quit').call('motor_off').ret()
 
 # ---- text -------------------------------------------------------------
@@ -705,6 +715,9 @@ a.lab('.m2').cp(2).jr('.m3', 'nz')
 a.ld16('de', 's_m2').jr('.mw')
 a.lab('.m3').ld16('de', 's_m3')
 a.lab('.mw')
+a.push('de')
+pstr(8, 3, 's_9sp')
+a.pop('de')
 ldhl(8, 3)
 a.ld_a_abs(running).or_('a').jr('.mn', 'z')
 a.call('print_i')
@@ -745,8 +758,20 @@ a.call('print')
 a.ld_a_abs(sweepn).ld('l', 'a').ld('h', 0).call('num2buf')
 pnum(11, 4)
 pstr(1, 5, 's_felt')
-a.ld_a_abs(result).ld('l', 'a').ld('h', 0).call('num2buf')
+a.ld_a_abs(mode).cp(1).jr('.r1', 'nz')
+a.ld_a_abs(result).jr('.rh')
+a.lab('.r1').ld_a_abs(result_off)
+a.lab('.rh').or_('a').jr('.rv', 'nz')
+pstr(9, 5, 's_none')
+a.jr('.cont')
+a.lab('.rv')
+a.ld_abs_a(tmpA)
+a.ld('l', 'a').ld('h', 0).call('num2buf')
 pnum(9, 5)
+a.ld_a_abs(tmpA).cp(1).jr('.rp', 'nz')
+pstr(14, 5, 's_bit1')
+a.jr('.cont')
+a.lab('.rp')
 pstr(14, 5, 's_bits')
 
 a.lab('.cont')
@@ -809,35 +834,49 @@ a.lab('.dblank')
 pstr(1, 10, 's_c18')
 a.lab('.dend')
 
-pdim(1, 12, 's_h1')
-a.ld_a_abs(mode).or_('a').jr('.ha1', 'nz')
-a.ld16('de', 's_aflip').jr('.hw')
-a.lab('.ha1').cp(3).jr('.ha2', 'nz')
-a.ld16('de', 's_ause').jr('.hw')
-a.lab('.ha2').ld16('de', 's_afelt')
-a.lab('.hw')
-ldhl(1, 13)
-a.call('print_d')
-pdim(13, 13, 's_bmode')
-pdim(1, 14, 's_h3')
-pdim(1, 15, 's_h4')
-a.call('burst_ok').jr('.h5s', 'z')
-a.ld16('de', 's_h5').jr('.h5w')
-a.lab('.h5s').ld16('de', 's_c18')
-a.lab('.h5w')
-ldhl(1, 16)
-a.call('print_d')
+a.call('draw_footer')
+a.ret()
+
+a.lab('draw_footer')                  # rows 12, 14 and 16: what each button does now
+for ry in (12, 14, 16):
+    pdim(1, ry, 's_c18')
+a.ld_a_abs(running).or_('a').jr('.idle', 'z')
+pdim(1, 12, 's_f_stop')
+a.ld_a_abs(mode).dec('a').cp(2).ret('nc')     # sweeps are modes 1 and 2
+pdim(1, 14, 's_f_felt')
+a.ret()
+a.lab('.idle')
+a.ld_a_abs(keys).and_(K_SEL).jr('.base', 'z')
+pdim(1, 12, 's_f_spin')
+pdim(13, 12, 's_f_unit')
+a.call('burst_ok').ret('z')
+pdim(1, 14, 's_f_run')
+pdim(13, 14, 's_f_gap')
+a.ret()
+a.lab('.base')
+pdim(1, 12, 's_f_play')
+pdim(13, 12, 's_f_mode')
+pdim(1, 16, 's_f_more')
+a.ld_a_abs(mode).or_('a').jr('.b1', 'nz')
+pdim(1, 14, 's_f_flip')
+pdim(13, 14, 's_f_bit')
+a.ret()
+a.lab('.b1').cp(3).jr('.b2', 'nz')
+pdim(1, 14, 's_f_edit')
+pdim(13, 14, 's_f_pick')
+a.ret()
+a.lab('.b2')
+pdim(13, 14, 's_f_bit')
 a.ret()
 
 # ---- data -------------------------------------------------------------
 strings = {
     's_title': " RUMBLE PULSE TEST",
     's_mode': "MODE",
-    's_m0': "PATTERN  ",
-    's_m1': "ON SWEEP ",
+    's_m0': "PATTERN",
+    's_m1': "ON SWEEP",
     's_m2': "OFF SWEEP",
-    's_m3': "PRESET   ",
-    's_ause': "A=USE IT   ",
+    's_m3': "PRESET",
     's_onbits': "ON BITS  ",
     's_offbits': "OFF BITS ",
     's_bit': "BIT",
@@ -850,20 +889,27 @@ strings = {
     's_on': "ON ",
     's_off': "OFF",
     's_runlbl': "RUN",
-    's_contv': "CONT           ",
+    's_contv': "CONT          ",
     's_gap': "GAP",
     's_felt': "FELT AT",
     's_bits': "BITS",
-    's_5sp': "     ",
-    's_7sp': "       ",
-    's_8sp': "        ",
-    's_h1': "START=RUN/STOP",
-    's_aflip': "A=FLIP BIT  ",
-    's_afelt': "A=I FEEL IT ",
-    's_bmode': "B=MODE",
-    's_h3': "UD=LEN    LR=MOVE",
-    's_h4': "SEL+A=UNIT +B=SPIN",
-    's_h5': "SEL+UD=RUN +LR=GAP",
+    's_bit1': "BIT ",
+    's_none': "   -      ",
+    's_9sp': "         ",
+    # '[' and ']' are the up/down and left/right arrows in font.py
+    's_f_play': "START PLAY",
+    's_f_stop': "START STOP",
+    's_f_mode': "B MODE",
+    's_f_flip': "A FLIP",
+    's_f_edit': "A EDIT",
+    's_f_felt': "A FELT IT",
+    's_f_bit': "[ BIT",
+    's_f_pick': "[ PICK",
+    's_f_more': "SELECT MORE",
+    's_f_spin': "B PRESPIN",
+    's_f_unit': "A UNIT",
+    's_f_run': "[ RUN",
+    's_f_gap': "] GAP",
     's_c18': "                  ",
     's_6sp': "      ",
 }
@@ -877,7 +923,7 @@ a.ascii('WALL HIT    ')
 a.b(0xFF, 3, 0)
 a.ascii('BUMPER      ')
 a.b(0x33, 8, 0)
-a.ascii('GENGAR BONUS')
+a.ascii('WIDE TICK   ')
 a.b(0x11, 8, 0)
 a.ascii('SLOW TICK   ')
 a.b(0x01, 8, 0)
