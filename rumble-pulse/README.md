@@ -1,15 +1,35 @@
 # rumble-pulse.gb
 
+## Moved to Bacon Bit Bench
+
+Use the **Rumble** instrument in the **MBC5** build of
+[Bacon Bit Bench](https://github.com/thisjustin816/bacon-bits) for current motor measurements.
+Download the [latest release](https://github.com/thisjustin816/bacon-bits/releases/latest) and follow the
+[Rumble manual](https://github.com/thisjustin816/bacon-bits/blob/main/MANUAL.md#rumble-mbc5). The MBC3 build has Clock in its place.
+
+The instrument supports the same pattern, bit length, prespin, burst length,
+gap and on/off sweeps. Start plays or stops; hold Select for timing settings.
+Use one frame per bit when replaying frame-based game patterns.
+The [repository README](../README.md#calibrating-a-board) explains how those
+measurements feed the patch parameters.
+
+Develop generic rumble diagnostics, fixes and test coverage in Bacon Bit Bench,
+and file [issues there](https://github.com/thisjustin816/bacon-bits/issues). Game patch changes stay in this repository.
+The standalone source, ROM, controls and measurements below remain for
+reproducing earlier results.
+
+## Historical standalone ROM
+
 A 32 KiB Game Boy ROM that plays arbitrary rumble patterns on demand, for
-finding what a cartridge motor responds to. The built ROM is checked in beside
-this file.
+finding what a cartridge motor responds to. The historical built ROM is
+checked in beside this file.
 
 Header is type `$1C` (MBC5 + RUMBLE), 32 KiB, no SRAM. Rumble is bit 3 of the
 RAM bank register at `$4000`.
 
 The repository [README](../README.md) covers which mode produces which of the
 three numbers [Set-PinballRumble.ps1](../Set-PinballRumble.ps1) takes, and how
-to replay a patched pattern here before flashing it.
+to replay a patched pattern in Bacon Bit Bench before flashing it.
 
 ## Screen
 

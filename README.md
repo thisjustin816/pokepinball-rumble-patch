@@ -133,10 +133,20 @@ puts back 1 of them. Keep the unpatched ROM.
 
 ## Calibrating a board
 
+Generic motor diagnostics now live in [Bacon Bit Bench](https://github.com/thisjustin816/bacon-bits).
+Use its **MBC5** [release cartridge](https://github.com/thisjustin816/bacon-bits/releases/latest) and
+[Rumble instrument](https://github.com/thisjustin816/bacon-bits/blob/main/MANUAL.md#rumble-mbc5) for calibration and pattern playback.
+The MBC3 build has Clock instead of Rumble. New diagnostic features, fixes and
+test coverage belong in Bacon Bit Bench; file [diagnostic issues there](https://github.com/thisjustin816/bacon-bits/issues).
+The game patch and its tests remain here. The old
+[`rumble-pulse/`](rumble-pulse/) ROM and source are retained for reproduction.
+
 Motors differ between cartridges, so one board's numbers won't apply to others.
-[`rumble-pulse/`](rumble-pulse/) holds a 32 KiB test ROM that plays
-arbitrary patterns on demand. Flash it, keep `BIT` at `1 FR`, and take one
-reading per mode:
+Open Rumble in Bacon Bit Bench and keep bit length at **1 frame**.
+Start plays or stops; stop before using B to choose a mode. Hold Select for
+timing settings: Select+A switches frame/millisecond units, Select+B changes prespin,
+Select+Up/Down changes burst length, and Select+Left/Right changes the gap.
+Take one reading per mode, using A to mark the first felt sweep step:
 
 | Measure    | Mode      | PRESPIN | Record                                   | Parameter        |
 | ---------- | --------- | ------- | ---------------------------------------- | ---------------- |
@@ -150,7 +160,8 @@ Then patch with what came back:
 ./Set-PinballRumble.ps1 -Rom pokepinball.gbc -StartFrames 3 -SustainFrames 1 -CoastGap 1
 ```
 
-Sanity check first: `PATTERN $FF`, `RUN 6`, `GAP 0`. If that is not
+Sanity check first: pattern `$FF`, burst length **6 bits**, gap **0 frames**,
+with one frame per bit. If that is not
 unmistakable, the cartridge is underdriven and no patch will rescue it.
 
 Record coast conservatively. If a one-frame gap already reads as pulsing rather
@@ -199,11 +210,11 @@ values back with one threshold changed. `-Author` changes the credit, and
 
 ### Checking a patch before flashing
 
-Before flashing a patched game, the same
-[`rumble-pulse.gb`](rumble-pulse/) used for calibrating above will play back any
-pattern and duration the patch produced, so how an event will feel is a question
-the test ROM can answer first. In PATTERN mode, set `PATTERN` to the byte, `RUN`
-to the duration, and `GAP` to the frames between repeats:
+Before flashing a patched game, use Bacon Bit Bench's Rumble instrument to
+play back the pattern and duration the patch produced. In Pattern mode, keep
+one frame per bit, set the pattern byte, set burst length to the duration in
+bits, and set the gap in frames. The historical RUN column below corresponds
+to burst length; GAP corresponds to the gap setting:
 
 | Check                         | PATTERN | RUN | GAP |
 | ----------------------------- | ------- | --- | --- |
@@ -255,7 +266,8 @@ a path to one and does the same from anywhere.
 `Invoke-Pester ./tests` runs the script end to end against synthetic ROMs, and
 `Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1`
 is the style check. GitHub Actions runs both on every push, along with a rebuild
-of the test ROM that fails if the checked-in copy has drifted from its source.
+of the historical standalone test ROM that fails if the checked-in copy has
+drifted from its source. New diagnostic development happens in Bacon Bit Bench.
 
 ## Credit
 
