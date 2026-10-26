@@ -144,7 +144,7 @@ The game patch and its tests remain here. The old
 Motors differ between cartridges, so one board's numbers won't apply to others.
 Open Rumble in Bacon Bit Bench and keep bit length at **1 frame**.
 Start plays or stops; stop before using B to choose a mode. Hold Select for
-timing settings: Select+A chooses frames, Select+B changes prespin,
+timing settings: Select+A switches frame/millisecond units, Select+B changes prespin,
 Select+Up/Down changes burst length, and Select+Left/Right changes the gap.
 Take one reading per mode, using A to mark the first felt sweep step:
 
